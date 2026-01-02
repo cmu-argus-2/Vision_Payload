@@ -138,7 +138,7 @@ def train_yolo(
         perspective=0,
         # Training parameters
         # Ultralytics YOLO only supports training on square images, so it will pad the image to (4608, 4608) with gray
-        imgsz=4600,  # Single integer (longest dimension)
+        imgsz=4608,  # Single integer (longest dimension)
         rect=True, 
         batch=2,
         plots=True,
