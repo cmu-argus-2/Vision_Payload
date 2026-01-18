@@ -131,7 +131,7 @@ def train_yolo(
         project=f"{TRAINING_LOG_DIR_PREFIX}_{region}",
         name=f"{TRAINING_LOG_DIR_PREFIX}_{region}_{time()}",
         # Image augmentation parameters
-        degrees=0,
+        degrees=10, # since our camera will not always be pointing at nadir
         scale=0,
         fliplr=0,
         mosaic=0,
