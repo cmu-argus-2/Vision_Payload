@@ -51,8 +51,6 @@ except ImportError:
 from utils.config_utils import USER_CONFIG_PATH, load_config
 from utils.earth_utils import lat_lon_to_ecef
 from utils.function_utils import unpack_and_call
-from vision_inference.landmark_detector import LandmarkDetector
-from vision_inference.logger import Logger
 
 LD_TRAINING_DIR_NAME = "LD_training"
 YOLO_CONFIG_FILE_NAME = "dataset.yaml"
@@ -147,6 +145,41 @@ def get_common_file_name_prefixes(input_dir: str, ignore_names: Iterable[str] = 
             f"{list(lat_lon_file_prefixes - image_file_prefixes)}"
         )
     return common_file_prefixes
+
+
+# ==================== Standalone LandmarkDetector Functions ====================
+
+def get_region_bounding_boxes_relative_path(region_id: str) -> str:
+    """
+    Get the relative path to the bounding box lat/lon coordinates file for a specific MGRS region.
+
+    :param region_id: The MGRS region ID to get the bounding box coordinates relative path for.
+    :return: The relative path to the bounding box coordinates file.
+    """
+    return os.path.join(region_id, "bounding_boxes.csv")
+
+
+def load_ground_truth(ground_truth_path: str) -> np.ndarray:
+    """
+    Loads ground truth bounding box coordinates from a CSV file.
+
+    :param ground_truth_path: Path to the ground truth CSV file.
+    :return: A numpy array of shape (N, 6) containing the following for each landmark:
+             (centroid_lat, centroid_lon, top_left_lat, top_left_lon, bottom_right_lat, bottom_right_lon).
+    """
+    return np.loadtxt(ground_truth_path, delimiter=",", skiprows=1)
+
+
+# ==================== Standalone Logger ====================
+
+def log_message(level: str, message: str) -> None:
+    """
+    Simple standalone logging function.
+
+    :param level: The log level (INFO, WARNING, ERROR, DEBUG).
+    :param message: The message to log.
+    """
+    print(f"[{level}] {message}")
 
 
 # ==================== Main Functions ====================
@@ -265,9 +298,9 @@ def setup_LD_training_directory(
             write_yolo_config = True
 
     if write_yolo_config:
-        bounding_boxes_lat_lon = LandmarkDetector.load_ground_truth(
+        bounding_boxes_lat_lon = load_ground_truth(
             os.path.join(
-                training_dir, LandmarkDetector.get_region_bounding_boxes_relative_path(region_id)
+                training_dir, get_region_bounding_boxes_relative_path(region_id)
             )
         )
         num_classes = bounding_boxes_lat_lon.shape[0]
@@ -455,9 +488,9 @@ def generate_yolo_label_gpu(
     assert split_dir_name in SPLIT_DIR_NAMES, f"Invalid split directory name: {split_dir_name}"
 
     training_dir = load_config(USER_CONFIG_PATH)["training_directory"]
-    bounding_boxes_lat_lon = LandmarkDetector.load_ground_truth(
+    bounding_boxes_lat_lon = load_ground_truth(
         os.path.join(
-            training_dir, LandmarkDetector.get_region_bounding_boxes_relative_path(region_id)
+            training_dir, get_region_bounding_boxes_relative_path(region_id)
         )
     )
     num_classes = bounding_boxes_lat_lon.shape[0]
@@ -485,13 +518,13 @@ def generate_yolo_label_gpu(
 
         # Check if files exist
         if not os.path.exists(img_path) or not os.path.exists(lat_lon_path):
-            Logger.log("WARNING", f"Missing file for: {region_id=}, {file_prefix=}.")
+            log_message("WARNING", f"Missing file for: {region_id=}, {file_prefix=}.")
             return
 
         # Try to load image
         image = cv2.imread(img_path)
         if image is None:
-            Logger.log("WARNING", f"Corrupted image file: {img_path}")
+            log_message("WARNING", f"Corrupted image file: {img_path}")
             return
 
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -500,7 +533,7 @@ def generate_yolo_label_gpu(
             with np.load(lat_lon_path) as data:
                 lat_lon = data["lat_lon"]
         except Exception as e:
-            Logger.log("WARNING", f"Failed to load lat/lon for {file_prefix}: {e}")
+            log_message("WARNING", f"Failed to load lat/lon for {file_prefix}: {e}")
             return
 
         # Create object without strict assertions
@@ -512,7 +545,7 @@ def generate_yolo_label_gpu(
         geotagged_image = FlexibleGeotaggedImage(image, lat_lon)
 
     except Exception as e:
-        Logger.log("WARNING", f"Failed to load geotagged image for: {region_id=}, {file_prefix=}. Error: {e}")
+        log_message("WARNING", f"Failed to load geotagged image for: {region_id=}, {file_prefix=}. Error: {e}")
         return
 
     height, width = geotagged_image.image.shape[:2]
@@ -562,7 +595,7 @@ def generate_yolo_label_gpu(
             closest_pixel_indices = cp.asnumpy(closest_pixel_indices)
 
         except Exception as e:
-            Logger.log("WARNING", f"GPU processing failed, falling back to CPU: {e}")
+            log_message("WARNING", f"GPU processing failed, falling back to CPU: {e}")
             # Fall back to CPU computation
             closest_pixel_indices = np.empty(4 * num_classes, dtype=int)
             minimum_distances = np.full(4 * num_classes, np.inf)
@@ -678,9 +711,9 @@ def generate_yolo_label_cpu(
     assert split_dir_name in SPLIT_DIR_NAMES, f"Invalid split directory name: {split_dir_name}"
 
     training_dir = load_config(USER_CONFIG_PATH)["training_directory"]
-    bounding_boxes_lat_lon = LandmarkDetector.load_ground_truth(
+    bounding_boxes_lat_lon = load_ground_truth(
         os.path.join(
-            training_dir, LandmarkDetector.get_region_bounding_boxes_relative_path(region_id)
+            training_dir, get_region_bounding_boxes_relative_path(region_id)
         )
     )
     num_classes = bounding_boxes_lat_lon.shape[0]
@@ -708,13 +741,13 @@ def generate_yolo_label_cpu(
 
         # Check if files exist
         if not os.path.exists(img_path) or not os.path.exists(lat_lon_path):
-            Logger.log("WARNING", f"Missing file for: {region_id=}, {file_prefix=}.")
+            log_message("WARNING", f"Missing file for: {region_id=}, {file_prefix=}.")
             return
 
         # Try to load image
         image = cv2.imread(img_path)
         if image is None:
-            Logger.log("WARNING", f"Corrupted image file: {img_path}")
+            log_message("WARNING", f"Corrupted image file: {img_path}")
             return
 
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -723,7 +756,7 @@ def generate_yolo_label_cpu(
             with np.load(lat_lon_path) as data:
                 lat_lon = data["lat_lon"]
         except Exception as e:
-            Logger.log("WARNING", f"Failed to load lat/lon for {file_prefix}: {e}")
+            log_message("WARNING", f"Failed to load lat/lon for {file_prefix}: {e}")
             return
 
         # Create object without strict assertions
@@ -735,7 +768,7 @@ def generate_yolo_label_cpu(
         geotagged_image = FlexibleGeotaggedImage(image, lat_lon)
 
     except Exception as e:
-        Logger.log("WARNING", f"Failed to load geotagged image for: {region_id=}, {file_prefix=}. Error: {e}")
+        log_message("WARNING", f"Failed to load geotagged image for: {region_id=}, {file_prefix=}. Error: {e}")
         return
 
     height, width = geotagged_image.image.shape[:2]
