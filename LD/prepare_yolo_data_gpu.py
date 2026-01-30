@@ -1,4 +1,4 @@
-"""
+"""                                                                                                                                                                  
 Prepares the training data for the specified MGRS regions for training YOLO models (GPU-accelerated).
 
 This script expects to find the following contents in the training directory:
@@ -249,6 +249,23 @@ def parse_args() -> argparse.Namespace:
         default=10000,
         help="Number of pixels to process per GPU batch (adjust based on GPU memory).",
     )
+    parser.add_argument(
+        "--dark_threshold",
+        type=int,
+        default=10,
+        help="Pixels with sum of RGB values below this are considered dark/invalid (default: 10).",
+    )
+    parser.add_argument(
+        "--min_data_threshold",
+        type=float,
+        default=0.5,
+        help="Minimum fraction of bbox that must have valid (non-dark) pixels (default: 0.5).",
+    )
+    parser.add_argument(
+        "--no_center_check",
+        action="store_true",
+        help="Disable checking if bbox center is in a non-dark region.",
+    )
     return parser.parse_args()
 
 
@@ -400,17 +417,56 @@ def setup_LD_training_directory(
     return True
 
 
+def is_bbox_center_valid(
+    image: np.ndarray,
+    closest_us: np.ndarray,
+    closest_vs: np.ndarray,
+    dark_threshold: int = 10,
+) -> np.ndarray:
+    """
+    Check if the center of each bounding box falls in a non-dark region.
+
+    This is a fast pre-filter to reject bounding boxes whose centers fall in
+    dark/black regions (e.g., areas outside the satellite's field of view).
+
+    :param image: The RGB image to check against.
+    :param closest_us: A numpy array of shape (N, 4) containing u-coordinates of bbox corners.
+    :param closest_vs: A numpy array of shape (N, 4) containing v-coordinates of bbox corners.
+    :param dark_threshold: Pixels with sum of RGB values below this are considered dark.
+    :return: A boolean numpy array of shape (N,) indicating which bbox centers are valid.
+    """
+    # Compute center of each bounding box
+    center_us = np.mean(closest_us, axis=1).astype(int)
+    center_vs = np.mean(closest_vs, axis=1).astype(int)
+
+    height, width = image.shape[:2]
+
+    # Clamp to image bounds
+    center_us = np.clip(center_us, 0, width - 1)
+    center_vs = np.clip(center_vs, 0, height - 1)
+
+    # Check if center pixel is not dark
+    center_pixels = image[center_vs, center_us]  # Shape: (N, 3)
+    center_brightness = np.sum(center_pixels, axis=1)  # Sum of RGB
+
+    return center_brightness > dark_threshold
+
+
 def get_valid_bounding_boxes(
     image: np.ndarray,
     closest_us: np.ndarray,
     closest_vs: np.ndarray,
     minimum_data_threshold: float = 0.5,
+    check_center: bool = True,
+    dark_threshold: int = 10,
 ) -> np.ndarray:
     """
     Compute a boolean mask indicating which bounding boxes are considered valid and should be used for training.
 
-    A bounding box is considered valid if none of the four corners' closest pixels are on the boundary of the image and
-    the fraction of the bounding box containing nonzero data is above the specified threshold.
+    A bounding box is considered valid if:
+    1. None of the four corners' closest pixels are on the boundary of the image
+    2. The center of the bounding box is not in a dark region (if check_center=True)
+    3. The fraction of the bounding box containing nonzero data is above the specified threshold
 
     :param image: The image to check the bounding boxes against.
     :param closest_us: A numpy array of shape (N, 4) containing the u-coordinates of the closest pixel to the top left,
@@ -419,6 +475,8 @@ def get_valid_bounding_boxes(
                        top right, bottom right, and bottom left corners of the bounding box, respectively.
     :param minimum_data_threshold: The minimum fraction of the bounding box that must contain nonzero data for it to be
                                    considered valid. Must be in the range [0, 1].
+    :param check_center: Whether to check if the bbox center is in a non-dark region.
+    :param dark_threshold: Pixels with sum of RGB values below this are considered dark.
     :return: A boolean numpy array of shape (N,) indicating which bounding boxes are valid.
     """
     assert image.ndim == 3, f"Expected image to have 3 dimensions, but got {image.ndim}."
@@ -438,6 +496,11 @@ def get_valid_bounding_boxes(
         (closest_us > 0) & (closest_us < width - 1) & (closest_vs > 0) & (closest_vs < height - 1),
         axis=1,
     )
+
+    # Check if bbox center is in a non-dark region (fast pre-filter)
+    if check_center:
+        center_valid = is_bbox_center_valid(image, closest_us, closest_vs, dark_threshold)
+        valid_bounding_boxes &= center_valid
 
     has_data = np.any(image > 0, axis=2)
     for i in range(len(valid_bounding_boxes)):
@@ -469,6 +532,9 @@ def generate_yolo_label_gpu(
     split_dir_name: str,
     file_prefix: str,
     gpu_batch_size: int = 10000,
+    dark_threshold: int = 10,
+    min_data_threshold: float = 0.5,
+    check_center: bool = True,
 ) -> None:
     """
     Generate a YOLO label .txt file for the specified region and file prefix using GPU acceleration.
@@ -484,6 +550,9 @@ def generate_yolo_label_gpu(
                         generate.
     :param gpu_batch_size: The number of pixels to process in each GPU batch when finding the closest pixel to each
                           bounding box corner. Smaller values use less GPU memory but may be slower.
+    :param dark_threshold: Pixels with sum of RGB below this are considered dark/invalid.
+    :param min_data_threshold: Minimum fraction of bbox that must have valid pixels.
+    :param check_center: Whether to check if bbox center is in a non-dark region.
     """
     assert split_dir_name in SPLIT_DIR_NAMES, f"Invalid split directory name: {split_dir_name}"
 
@@ -662,7 +731,14 @@ def generate_yolo_label_gpu(
     closest_us = closest_us.reshape(4, num_classes).T
     closest_vs = closest_vs.reshape(4, num_classes).T
 
-    valid_bounding_boxes = get_valid_bounding_boxes(geotagged_image.image, closest_us, closest_vs)
+    valid_bounding_boxes = get_valid_bounding_boxes(
+        geotagged_image.image,
+        closest_us,
+        closest_vs,
+        minimum_data_threshold=min_data_threshold,
+        check_center=check_center,
+        dark_threshold=dark_threshold,
+    )
     closest_us = closest_us[valid_bounding_boxes, :]
     closest_vs = closest_vs[valid_bounding_boxes, :]
     class_ids = np.arange(num_classes)[valid_bounding_boxes]
@@ -692,6 +768,9 @@ def generate_yolo_label_cpu(
     split_dir_name: str,
     file_prefix: str,
     pixel_batch_size: int = 1000,
+    dark_threshold: int = 10,
+    min_data_threshold: float = 0.5,
+    check_center: bool = True,
 ) -> None:
     """
     Generate a YOLO label .txt file for the specified region and file prefix (CPU version).
@@ -707,6 +786,9 @@ def generate_yolo_label_cpu(
                         generate.
     :param pixel_batch_size: The number of pixels to process in each batch when finding the closest pixel to each
                              bounding box corner. Smaller values will use less memory but may be slower.
+    :param dark_threshold: Pixels with sum of RGB below this are considered dark/invalid.
+    :param min_data_threshold: Minimum fraction of bbox that must have valid pixels.
+    :param check_center: Whether to check if bbox center is in a non-dark region.
     """
     assert split_dir_name in SPLIT_DIR_NAMES, f"Invalid split directory name: {split_dir_name}"
 
@@ -809,7 +891,14 @@ def generate_yolo_label_cpu(
     closest_us = closest_us.reshape(4, num_classes).T
     closest_vs = closest_vs.reshape(4, num_classes).T
 
-    valid_bounding_boxes = get_valid_bounding_boxes(geotagged_image.image, closest_us, closest_vs)
+    valid_bounding_boxes = get_valid_bounding_boxes(
+        geotagged_image.image,
+        closest_us,
+        closest_vs,
+        minimum_data_threshold=min_data_threshold,
+        check_center=check_center,
+        dark_threshold=dark_threshold,
+    )
     closest_us = closest_us[valid_bounding_boxes, :]
     closest_vs = closest_vs[valid_bounding_boxes, :]
     class_ids = np.arange(num_classes)[valid_bounding_boxes]
@@ -885,12 +974,26 @@ def main():
                 )
 
     # Choose the appropriate function based on GPU availability
+    check_center = not args.no_center_check
     if args.use_gpu:
         print(f"Using GPU acceleration with batch size {args.gpu_batch_size}")
-        generate_func = partial(generate_yolo_label_gpu, gpu_batch_size=args.gpu_batch_size)
+        print(f"Dark region filtering: center_check={check_center}, dark_threshold={args.dark_threshold}, min_data={args.min_data_threshold}")
+        generate_func = partial(
+            generate_yolo_label_gpu,
+            gpu_batch_size=args.gpu_batch_size,
+            dark_threshold=args.dark_threshold,
+            min_data_threshold=args.min_data_threshold,
+            check_center=check_center,
+        )
     else:
         print("Using CPU computation")
-        generate_func = generate_yolo_label_cpu
+        print(f"Dark region filtering: center_check={check_center}, dark_threshold={args.dark_threshold}, min_data={args.min_data_threshold}")
+        generate_func = partial(
+            generate_yolo_label_cpu,
+            dark_threshold=args.dark_threshold,
+            min_data_threshold=args.min_data_threshold,
+            check_center=check_center,
+        )
 
     if args.num_processes > 1:
         total_requests = sum(1 for _ in get_requests_generator())
@@ -905,8 +1008,12 @@ def main():
                 )
             )
     else:
-        list(starmap(generate_func, get_requests_generator()))
+        # list(starmap(generate_func, get_requests_generator()))
+        requests = list(get_requests_generator())
+        for req in tqdm(requests, desc="Generating YOLO label files"):
+            generate_func(*req)
 
 
 if __name__ == "__main__":
     main()
+
