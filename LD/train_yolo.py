@@ -1,5 +1,5 @@
-"""
-Train landmark detection YOLO models for the specified MGRS regions (standalone version).
+"""                                                                                                                                                                                                                
+Train landmark detection YOLO models for the specified MGRS regions (standalone version).                                                                                                                          
 
 This script expects to find the following contents in the training directory:
 - /training_directory
@@ -54,16 +54,10 @@ def parse_args():
     )
 
     parser.add_argument(
-        "--training_dir",
-        type=str,
-        required=True,
-        help="Path to the training directory containing region subdirectories.",
-    )
-    parser.add_argument(
         "--regions",
         type=str,
         nargs="+",
-        required=True,
+        default=load_config()["vision"]["salient_mgrs_region_ids"],
         help="MGRS regions to train landmark detection YOLO models for.",
     )
     parser.add_argument(
@@ -209,9 +203,11 @@ def main() -> None:
     """
     args = parse_args()
 
+    training_dir = load_config(USER_CONFIG_PATH)["training_directory"]
+
     # Validate training directory exists
-    if not os.path.isdir(args.training_dir):
-        raise NotADirectoryError(f"Training directory does not exist: {args.training_dir}")
+    if not os.path.isdir(training_dir):
+        raise NotADirectoryError(f"Training directory does not exist: {training_dir}")
 
     regions = sorted(set(args.regions) - set(args.skip_regions))
 
@@ -225,7 +221,7 @@ def main() -> None:
     for region in tqdm(regions, desc="Training YOLO models"):
         try:
             train_yolo(
-                training_dir=args.training_dir,
+                training_dir=training_dir,
                 region=region,
                 overwrite=args.overwrite,
                 version=args.version,
