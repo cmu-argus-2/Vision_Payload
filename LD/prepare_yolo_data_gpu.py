@@ -1,4 +1,4 @@
-"""                                                                                                                                                                  
+"""
 Prepares the training data for the specified MGRS regions for training YOLO models (GPU-accelerated).
 
 This script expects to find the following contents in the training directory:
@@ -564,10 +564,12 @@ def generate_yolo_label_gpu(
     )
     num_classes = bounding_boxes_lat_lon.shape[0]
 
-    top_left_lat_lon = bounding_boxes_lat_lon[:, 2:4]
-    bottom_right_lat_lon = bounding_boxes_lat_lon[:, 4:6]
-    top_right_lat_lon = np.column_stack((top_left_lat_lon[:, 0], bottom_right_lat_lon[:, 1]))
-    bottom_left_lat_lon = np.column_stack((bottom_right_lat_lon[:, 0], top_left_lat_lon[:, 1]))
+    # CSV columns are: [centroid_lon, centroid_lat, tl_lon, tl_lat, br_lon, br_lat]
+    # But lat_lon_to_ecef expects [lat, lon], so we need to swap the order
+    top_left_lat_lon = bounding_boxes_lat_lon[:, [3, 2]]  # [tl_lat, tl_lon]
+    bottom_right_lat_lon = bounding_boxes_lat_lon[:, [5, 4]]  # [br_lat, br_lon]
+    top_right_lat_lon = np.column_stack((top_left_lat_lon[:, 0], bottom_right_lat_lon[:, 1]))  # [tl_lat, br_lon]
+    bottom_left_lat_lon = np.column_stack((bottom_right_lat_lon[:, 0], top_left_lat_lon[:, 1]))  # [br_lat, tl_lon]
 
     stacked_corners_lat_lon = np.concatenate(
         # must be in a circular order for cv2.fillPoly to work correctly
@@ -800,10 +802,12 @@ def generate_yolo_label_cpu(
     )
     num_classes = bounding_boxes_lat_lon.shape[0]
 
-    top_left_lat_lon = bounding_boxes_lat_lon[:, 2:4]
-    bottom_right_lat_lon = bounding_boxes_lat_lon[:, 4:6]
-    top_right_lat_lon = np.column_stack((top_left_lat_lon[:, 0], bottom_right_lat_lon[:, 1]))
-    bottom_left_lat_lon = np.column_stack((bottom_right_lat_lon[:, 0], top_left_lat_lon[:, 1]))
+    # CSV columns are: [centroid_lon, centroid_lat, tl_lon, tl_lat, br_lon, br_lat]
+    # But lat_lon_to_ecef expects [lat, lon], so we need to swap the order
+    top_left_lat_lon = bounding_boxes_lat_lon[:, [3, 2]]  # [tl_lat, tl_lon]
+    bottom_right_lat_lon = bounding_boxes_lat_lon[:, [5, 4]]  # [br_lat, br_lon]
+    top_right_lat_lon = np.column_stack((top_left_lat_lon[:, 0], bottom_right_lat_lon[:, 1]))  # [tl_lat, br_lon]
+    bottom_left_lat_lon = np.column_stack((bottom_right_lat_lon[:, 0], top_left_lat_lon[:, 1]))  # [br_lat, tl_lon]
 
     stacked_corners_lat_lon = np.concatenate(
         # must be in a circular order for cv2.fillPoly to work correctly
@@ -1008,7 +1012,6 @@ def main():
                 )
             )
     else:
-        # list(starmap(generate_func, get_requests_generator()))
         requests = list(get_requests_generator())
         for req in tqdm(requests, desc="Generating YOLO label files"):
             generate_func(*req)
@@ -1016,4 +1019,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
