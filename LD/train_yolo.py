@@ -178,23 +178,19 @@ def train_yolo(
         resume=resume,
         epochs=epochs,
         device=device,
+        patience=0,  # Disable early stopping
+        conf=0.5,  # Higher confidence threshold to reduce false positives
     )
 
-    # Copy the best weights to the expected output location
-    best_weights = results.save_dir / "weights" / "best.pt"
-    if best_weights.exists():
-        import shutil
-        shutil.copy(best_weights, output_file)
-        print(f"Saved best weights to {output_file}")
+    # Copy the final weights to the expected output location
+    # Using last.pt since custom ultralytics selects "best" based on buggy MSE metric
+    import shutil
+    last_weights = results.save_dir / "weights" / "last.pt"
+    if last_weights.exists():
+        shutil.copy(last_weights, output_file)
+        print(f"Saved last weights to {output_file}")
     else:
-        # Fall back to last.pt if best.pt doesn't exist
-        last_weights = results.save_dir / "weights" / "last.pt"
-        if last_weights.exists():
-            import shutil
-            shutil.copy(last_weights, output_file)
-            print(f"Saved last weights to {output_file}")
-        else:
-            print(f"Warning: Could not find trained weights in {results.save_dir}")
+        print(f"Warning: Could not find trained weights in {results.save_dir}")
 
 
 def main() -> None:
