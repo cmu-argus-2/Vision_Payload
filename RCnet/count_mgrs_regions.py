@@ -17,13 +17,22 @@ This scipy will generate/overwrite the following contents in the training direct
 import argparse
 import json
 import os
+from dataclasses import dataclass
 from functools import partial
 from itertools import starmap
 from multiprocessing import Pool, cpu_count
-from typing import Generator, Tuple
+from typing import ClassVar, Generator, Tuple
 
 import numpy as np
 from tqdm import tqdm
+
+try:
+    import cupy as cp
+    GPU_AVAILABLE = True
+except ImportError:
+    GPU_AVAILABLE = False
+    print("Warning: CuPy not available. Falling back to CPU computation.")
+    print("Install CuPy for GPU acceleration: pip install cupy-cuda11x (replace 11x with your CUDA version)")
 
 from utils.config_utils import USER_CONFIG_PATH, load_config
 from utils.earth_utils import calculate_mgrs_zones
@@ -175,7 +184,10 @@ def setup_region_dir(region_id: str, overwrite: bool, resume: bool) -> bool:
     assert not (resume and overwrite), "resume and overwrite cannot be used together."
 
     training_dir = load_config(USER_CONFIG_PATH)["training_directory"]
+    print(f"DEBUG: USER_CONFIG_PATH={USER_CONFIG_PATH}")
+    print(f"DEBUG: training_dir={training_dir}")
     region_dir = os.path.join(training_dir, region_id)
+    print(f"DEBUG: region_dir={region_dir}")
     existing_files = [
         file_name for file_name in os.listdir(region_dir) if file_name.endswith(MGRS_COUNTS_SUFFIX)
     ]

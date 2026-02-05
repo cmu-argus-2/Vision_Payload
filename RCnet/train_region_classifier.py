@@ -511,7 +511,7 @@ class TrainRegionClassifier(BaseRegionClassifier):
             plt.title("Class-wise Accuracies")
             plt.xticks(
                 ticks=range(len(self.regions)), labels=self.regions, rotation=90
-            )  # Assuming 40 classes
+            )  # 16 MGRS regions
             plt.ylim(0, 100)  # Accuracy range 0-100%
 
             # Save the figure and log to wandb

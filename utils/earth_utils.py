@@ -10,6 +10,12 @@ import numpy as np
 from brahe import Epoch
 from brahe.constants import R_EARTH
 
+try:
+    import cupy as cp
+    GPU_AVAILABLE = True
+except ImportError:
+    GPU_AVAILABLE = False
+
 
 # TODO: use brahe constants instead of hardcoding
 def ecef_to_lat_lon(
@@ -249,6 +255,15 @@ def calculate_mgrs_zones(lat_lon: np.ndarray) -> np.ndarray:
         # Special case for single lat/lon pair
         return calculate_mgrs_zones(lat_lon[np.newaxis, :])[0, :]
 
+    # Use GPU if available for numerical operations
+    xp = cp if GPU_AVAILABLE else np
+    
+    # Transfer to GPU if available
+    if GPU_AVAILABLE:
+        lat_lon_gpu = cp.asarray(lat_lon)
+    else:
+        lat_lon_gpu = lat_lon
+
     # Create lookup tables for vectorized latitude band calculation
     latitude_band_names = np.array([band["name"] for band in mgrs_latitude_bands])
     latitude_band_edges = np.array(
@@ -257,34 +272,49 @@ def calculate_mgrs_zones(lat_lon: np.ndarray) -> np.ndarray:
 
     # Filter out invalid coordinates and flatten
     valid_indices = (
-        np.all(~np.isnan(lat_lon), axis=-1) & (lat_lon[..., 0] >= -80) & (lat_lon[..., 0] < 84)
+        xp.all(~xp.isnan(lat_lon_gpu), axis=-1) & (lat_lon_gpu[..., 0] >= -80) & (lat_lon_gpu[..., 0] < 84)
     )
-    lat_flat, lon_flat = lat_lon[valid_indices, :].T
+    lat_flat, lon_flat = lat_lon_gpu[valid_indices, :].T
 
-    # Determine latitude bands
-    lat_bands = np.empty(len(lat_flat), dtype="S1")
-    seen_mask = np.zeros(len(lat_flat), dtype=bool)
+    # Transfer to CPU for string operations (CuPy doesn't support byte strings well)
+    if GPU_AVAILABLE:
+        lat_flat_cpu = cp.asnumpy(lat_flat)
+        lon_flat_cpu = cp.asnumpy(lon_flat)
+        valid_indices_cpu = cp.asnumpy(valid_indices)
+    else:
+        lat_flat_cpu = lat_flat
+        lon_flat_cpu = lon_flat
+        valid_indices_cpu = valid_indices
+
+    # Determine latitude bands (on CPU)
+    lat_bands = np.empty(len(lat_flat_cpu), dtype="S1")
+    seen_mask = np.zeros(len(lat_flat_cpu), dtype=bool)
     for name, (min_lat, max_lat) in zip(latitude_band_names, latitude_band_edges):
-        mask = (lat_flat >= min_lat) & (lat_flat < max_lat)
+        mask = (lat_flat_cpu >= min_lat) & (lat_flat_cpu < max_lat)
         lat_bands[mask] = name
         assert ~np.any(seen_mask & mask)
         seen_mask |= mask
     assert np.all(seen_mask)
 
-    # Determine UTM zones (default calculation)
-    utm_zones = ((lon_flat + 180) // 6 + 1).astype(int)
+    # Determine UTM zones (default calculation, on CPU)
+    utm_zones = ((lon_flat_cpu + 180) // 6 + 1).astype(int)
     for exception in mgrs_utm_exceptions:
         mask = (
-            (lon_flat >= exception["min_lon"])
-            & (lon_flat < exception["max_lon"])
+            (lon_flat_cpu >= exception["min_lon"])
+            & (lon_flat_cpu < exception["max_lon"])
             & np.isin(lat_bands, exception["bands"])
         )
         utm_zones[mask] = exception["zone"]
     assert np.all(utm_zones >= 1) and np.all(utm_zones <= 60)
-    utm_zones = np.char.zfill(utm_zones.astype("S2"), 2)
-
-    mgrs_regions = np.full(valid_indices.shape, b"", dtype="S3")
-    mgrs_regions[valid_indices] = np.char.add(utm_zones, lat_bands)
+    
+    # Convert to string arrays (on CPU)
+    utm_zones_str = np.char.zfill(utm_zones.astype("S2"), 2)
+    mgrs_regions_valid = np.char.add(utm_zones_str, lat_bands)
+    
+    # Create final result
+    mgrs_regions = np.full(valid_indices_cpu.shape, b"", dtype="S3")
+    mgrs_regions[valid_indices_cpu] = mgrs_regions_valid
+    
     return mgrs_regions
 
 
