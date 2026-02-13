@@ -225,6 +225,11 @@ def count_mgrs_regions(region_id: str, file_prefix: str) -> None:
     }
 
     output_path = os.path.join(training_dir, region_id, f"{file_prefix}{MGRS_COUNTS_SUFFIX}")
+    
+    # Skip if file already exists
+    if os.path.exists(output_path):
+        return
+    
     with open(output_path, "w") as f:
         json.dump(counts, f, indent=4)
 
