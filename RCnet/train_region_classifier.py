@@ -15,12 +15,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 import psutil
 import torch
-from data_loader import MGRSImageDataset as ImageDataset
+from dataloader import MGRSImageDataset as ImageDataset
 from plotter import Plotter
 from torch import nn, optim
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from tqdm.auto import tqdm
+
+from utils.config_utils import USER_CONFIG_PATH, BROKEN_FILES_PATH, load_config
+
 
 import wandb
 from vision_inference.region_classifier import RegionClassifier as BaseRegionClassifier
@@ -71,6 +74,7 @@ class TrainRegionClassifier(BaseRegionClassifier):
     def __init__(
         self,
         data_path: str,
+        broken_files_path: Optional[str] = None,
         non_salient_data_path: Optional[str] = None,
         selected_classes: Optional[List[str]] = None,
         save_plot_flag: bool = False,
@@ -86,7 +90,7 @@ class TrainRegionClassifier(BaseRegionClassifier):
             save_plot_path (str): Path to save the loss plot.
         """
         # Prepare data first to get the number of classes
-        self._prepare_batch_data(data_path, non_salient_data_path, selected_classes)
+        self._prepare_batch_data(data_path, broken_files_path, non_salient_data_path, selected_classes)
 
         # Now initialize the parent class with our number of classes and skip weight loading
         assert len(self.regions) == BaseRegionClassifier.NUM_CLASSES, "Number of classes mismatch!"
@@ -100,6 +104,7 @@ class TrainRegionClassifier(BaseRegionClassifier):
     def _prepare_batch_data(
         self,
         data_path: str,
+        broken_files: Optional[List[str]],
         non_salient_data_path: Optional[str],
         selected_classes: Optional[List[str]],
     ) -> None:
@@ -108,7 +113,8 @@ class TrainRegionClassifier(BaseRegionClassifier):
 
         Args:
             data_path (str): Path to the dataset directory.
-            selected_classes (list): List of salient regions for classification.
+            broken_files (list) (Optional): List of broken files.
+            selected_classes (list) (Optional): List of salient regions for classification.
         """
         if selected_classes is None:
             # Use all regions from configuration using the parent class's method
@@ -121,6 +127,15 @@ class TrainRegionClassifier(BaseRegionClassifier):
                 Logger.log("WARNING", "Failed to load regions from config, using all available classes for training!")
                 Logger.log("ERROR", f"Error: {e}")
 
+        if broken_files is None:
+            try:
+                broken_files = BaseRegionClassifier.load_broken_files()
+                Logger.log("INFO", f"Loaded {len(broken_files)} broken files from configuration")
+            except Exception as e:
+                Logger.log("WARNING", "Failed to load broken files from config, the RC net training will break if it encounters a truncated image!")
+                Logger.log("ERROR", f"Error: {e}")
+                broken_files = []
+        
         self.regions = selected_classes
         Logger.log("INFO", f"Using regions: {self.regions}")
 
@@ -139,7 +154,7 @@ class TrainRegionClassifier(BaseRegionClassifier):
             ]
         )
 
-        self.test_transform = transforms.Compose(
+        self.test_transform = transforms.Compose( 
             [
                 transforms.Resize((224, 224)),
                 # transforms.RandomResizedCrop(224, scale=(0.8, 1.0), ratio=(0.75, 1.33)),
@@ -155,6 +170,7 @@ class TrainRegionClassifier(BaseRegionClassifier):
         # Load datasets with appropriate transforms
         train_dataset = ImageDataset(
             data_path,
+            broken_files,
             non_salient_data_path,
             selected_classes,
             transform=self.train_transform,
@@ -162,6 +178,7 @@ class TrainRegionClassifier(BaseRegionClassifier):
         )
         val_dataset = ImageDataset(
             data_path,
+            broken_files,
             non_salient_data_path,
             selected_classes,
             transform=self.test_transform,
@@ -169,6 +186,7 @@ class TrainRegionClassifier(BaseRegionClassifier):
         )
         test_dataset = ImageDataset(
             data_path,
+            broken_files,
             non_salient_data_path,
             selected_classes,
             transform=self.test_transform,
@@ -222,7 +240,7 @@ class TrainRegionClassifier(BaseRegionClassifier):
                 "epochs": epochs,
                 "learning_rate": learning_rate,
                 "architecture": "EfficientNet-b0",
-                "dataset": "Sentinel",
+                "dataset": "Landsat Mosaic",
             },
         )
         wandb.watch(self.model, log="all", log_freq=100)

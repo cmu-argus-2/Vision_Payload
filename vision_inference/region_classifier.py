@@ -36,7 +36,7 @@ class RegionClassifier:
     A class to classify MGRS regions in images using a pretrained EfficientNet model.
     """
 
-    NUM_CLASSES = 16
+    NUM_CLASSES = 15
     CONFIDENCE_THRESHOLD = 0.55
     DOWNSAMPLED_SIZE = (224, 224)
     IMAGE_NET_MEAN = [0.485, 0.456, 0.406]
@@ -112,6 +112,25 @@ class RegionClassifier:
             return region_ids
         except Exception as e:
             Logger.log("ERROR", f"Configuration error: {e}")
+            raise
+
+    def load_broken_files(self, broken_files_path: str) -> List[str]:
+        """
+        Load the list of broken files from a YAML file.
+
+        Args:
+            broken_files_path (str): The path to the YAML file containing the list of broken files.
+        
+        Returns:
+            A list of broken file paths.
+        """
+        try:
+            config = load_config(broken_files_path)
+            broken_files = config.get("broken_files", [])
+            Logger.log("INFO", f"Loaded {len(broken_files)} broken files from {broken_files_path}.")
+            return broken_files
+        except Exception as e:
+            Logger.log("ERROR", f"Failed to load broken files: {e}")
             raise
 
     def classify_region(self, frame_obj: Frame) -> List[str]:

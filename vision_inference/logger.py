@@ -82,7 +82,7 @@ class Logger:
         # Create handlers
         c_handler = logging.StreamHandler()
         f_handler = logging.FileHandler(cls.log_file_path, mode="a")  # Append mode
-        c_handler.setLevel(logging.INFO)
+        c_handler.setLevel(logging.DEBUG)
         f_handler.setLevel(map_log_level(log_level))
 
         # Create formatters and add them to handlers

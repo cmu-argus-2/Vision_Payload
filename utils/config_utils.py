@@ -10,6 +10,7 @@ import yaml
 
 MAIN_CONFIG_PATH = os.path.abspath(os.path.join(__file__, "../../config.yaml"))
 USER_CONFIG_PATH = os.path.abspath(os.path.join(__file__, "../../user_config.yaml"))
+BROKEN_FILES_PATH = os.path.abspath(os.path.join(__file__, "../../broken_files.yaml"))
 
 
 @cache

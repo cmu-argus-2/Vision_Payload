@@ -19,6 +19,7 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset
 
+from utils.config_utils import BROKEN_FILES_PATH
 from vision_inference.logger import Logger
 
 
@@ -28,6 +29,7 @@ class MGRSImageDataset(Dataset):
     def __init__(
         self,
         root_dir: str,
+        broken_files: Optional[List[str]] = None,
         root_dir_non_salient: Optional[str] = None,
         salient_regions: List[str] = None,
         transform: Optional[object] = None,
@@ -61,14 +63,18 @@ class MGRSImageDataset(Dataset):
 
         # Collect images and their corresponding lat/lon files
         self.files = []
+        broken_file_set = set(broken_files or [])
         for f in os.listdir(root_dir):
             # Iterate through region folders
+            print(f"Processing region folder: {f}")
             if os.path.isdir(os.path.join(root_dir, f)):
+                print(f'Directory Path: {os.path.join(root_dir, f)}')
                 region_dir = os.path.join(root_dir, f)
                 for file in os.listdir(region_dir):
-                    if file.endswith(".png") or file.endswith(".jpg"):
-                        # Make sure the file starts with a number
-                        if not file[0].isdigit():
+                    # print(f"Processing file: {file}")
+                    if (file.endswith(".png") or file.endswith(".jpg")) and file not in broken_file_set:
+                        # The files all start with 'l8_' followed by region and image ID
+                        if not file[3].isdigit():
                             continue
                         img_path = os.path.join(region_dir, file)
                         json_path = os.path.join(
@@ -96,7 +102,6 @@ class MGRSImageDataset(Dataset):
         total_size = len(self.files)
         train_size = int(train_ratio * total_size)
         val_size = int(val_ratio * total_size)
-        test_size = total_size - train_size - val_size
 
         # Split the data
         if split == "train":
@@ -107,6 +112,24 @@ class MGRSImageDataset(Dataset):
             self.files = self.files[train_size + val_size :]
 
         Logger.log("INFO", f"Total {split} images: {len(self.files)}")
+
+    def _append_broken_file(self, img_path: str) -> None:
+        """Append a broken image filename to broken_files.yaml if not already present."""
+        file_name = os.path.basename(img_path)
+        try:
+            existing = set()
+            if os.path.exists(BROKEN_FILES_PATH):
+                with open(BROKEN_FILES_PATH, "r", encoding="utf-8") as file:
+                    existing = {line.strip() for line in file if line.strip()}
+
+            if file_name not in existing:
+                with open(BROKEN_FILES_PATH, "a", encoding="utf-8") as file:
+                    if existing:
+                        file.write("\n")
+                    file.write(file_name)
+                Logger.log("INFO", f"Added broken file to list: {file_name}")
+        except Exception as e:
+            Logger.log("WARNING", f"Failed to update broken files list for {file_name}: {e}")
 
     def _parse_region_and_id(self, img_path: str) -> Tuple[str, str]:
         region = os.path.basename(os.path.dirname(img_path))
@@ -135,7 +158,14 @@ class MGRSImageDataset(Dataset):
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
         img_path, json_path = self.files[idx]
 
-        image = Image.open(img_path).convert("RGB")
+        Logger.log("DEBUG", f"Loading image: {img_path} with JSON: {json_path}")
+        try:
+            image = Image.open(img_path).convert("RGB") # TODO: Consider HSV, may get better results
+        except Exception as e:
+            Logger.log("ERROR", f"Failed to load image {img_path}: {e}")
+            self._append_broken_file(img_path)
+            # Return None and skip
+            return None, None
         if self.transform:
             image = self.transform(image)
 

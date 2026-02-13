@@ -49,6 +49,10 @@ coverage.xml
 .pytest_cache/
 cover/
 
+# Training logs
+log/
+wandb/
+
 # Translations
 *.mo
 *.pot

@@ -8,7 +8,7 @@ import argparse
 
 import torch
 
-from VisionTrainingGround.RCnet.src.region_classifier import TrainRegionClassifier
+from train_region_classifier import TrainRegionClassifier
 
 
 def parse_args():
@@ -44,11 +44,13 @@ def parse_args():
     parser.add_argument(
         "--data_dir", type=str, required=True, help="Path to the dataset directory."
     )
+    
     parser.add_argument(
-        "--non_salient_data_dir",
-        type=str,
-        default=None,
-        help="Path to the non-salient dataset directory.",
+        "--broken_files_path", type=str, default=None, help="Path to the broken files list.",
+    )
+    
+    parser.add_argument(
+        "--non_salient_data_dir", type=str, default=None, help="Path to the non-salient dataset directory.",
     )
     parser.add_argument(
         "--save_plot_path", type=str, default="plot.png", help="Path to save the training plot."
@@ -57,16 +59,13 @@ def parse_args():
         "--model_save_path", type=str, default="model.pth", help="Path to save the trained model."
     )
     parser.add_argument(
-        "--model_load_path",
-        type=str,
-        default="model.pth",
-        help="Path to load the pre-trained model.",
+        "--model_load_path", type=str,default="model.pth", help="Path to load the pre-trained model.",
     )
 
     # Hyperparameters
     parser.add_argument("--epochs", type=int, default=10, help="Number of training epochs.")
     parser.add_argument(
-        "--learning_rate", type=float, default=1e-3, help="Learning rate for the optimizer."
+        "--learning_rate", type=float, default=1e-4, help="Learning rate for the optimizer."
     )
 
     return parser.parse_args()
@@ -79,6 +78,7 @@ if __name__ == "__main__":
     # Create the classifier object
     classifier = TrainRegionClassifier(
         data_path=args.data_dir,
+        broken_files_path=args.broken_files_path,
         non_salient_data_path=args.non_salient_data_dir,
         save_plot_flag=args.save_plot_flag,
         save_plot_path=args.save_plot_path,
