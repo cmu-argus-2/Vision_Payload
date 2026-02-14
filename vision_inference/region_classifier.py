@@ -29,13 +29,11 @@ from utils.config_utils import USER_CONFIG_PATH, load_config
 from vision_inference.frame import Frame
 from vision_inference.logger import Logger
 from vision_inference.numpy_dataloader import ImageSimInference
-
-
 class RegionClassifier:
     """
     A class to classify MGRS regions in images using a pretrained EfficientNet model.
     """
-
+    
     NUM_CLASSES = 15
     CONFIDENCE_THRESHOLD = 0.55
     DOWNSAMPLED_SIZE = (224, 224)
@@ -103,12 +101,13 @@ class RegionClassifier:
         try:
             config = load_config()
             region_ids = config["vision"]["salient_mgrs_region_ids"]
-            assert (
-                len(region_ids) == RegionClassifier.NUM_CLASSES
-            ), "Incorrect number of region IDs."
-            assert (
-                len(set(region_ids)) == RegionClassifier.NUM_CLASSES
-            ), "Duplicate region IDs detected."
+            
+            check_duplicates = set()
+            for region_id in region_ids:
+                if region_id in check_duplicates:
+                    raise ValueError(f"Duplicate region ID detected: {region_id}")
+                check_duplicates.add(region_id)
+
             return region_ids
         except Exception as e:
             Logger.log("ERROR", f"Configuration error: {e}")
@@ -271,7 +270,9 @@ class ClassifierEfficient(nn.Module):
         for param in self.efficientnet.features[:3].parameters():
             param.requires_grad = False
         num_features = self.efficientnet.classifier[1].in_features
-        self.efficientnet.classifier[1] = nn.Linear(num_features, RegionClassifier.NUM_CLASSES)
+        # num_classes = len(RegionClassifier.load_region_ids())
+        self.efficientnet.classifier[1] = nn.Linear(num_features, RegionClassifier.NUM_CLASSES) # TODO Remove after debug
+        # self.efficientnet.classifier[1] = nn.Linear(num_features, num_classes)
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

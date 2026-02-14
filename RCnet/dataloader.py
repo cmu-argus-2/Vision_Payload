@@ -63,11 +63,12 @@ class MGRSImageDataset(Dataset):
 
         # Collect images and their corresponding lat/lon files
         self.files = []
+        salient_regions_set = set(self.salient_regions)
         broken_file_set = set(broken_files or [])
         for f in os.listdir(root_dir):
             # Iterate through region folders
             print(f"Processing region folder: {f}")
-            if os.path.isdir(os.path.join(root_dir, f)):
+            if os.path.isdir(os.path.join(root_dir, f)) and f in salient_regions_set:
                 print(f'Directory Path: {os.path.join(root_dir, f)}')
                 region_dir = os.path.join(root_dir, f)
                 for file in os.listdir(region_dir):
