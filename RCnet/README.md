@@ -89,6 +89,23 @@ python RCnet/main.py \
     --learning_rate 1e-3
 ```
 
+### VRAM-Optimized Training (5-10x Faster)
+
+For datasets that fit in GPU memory, use `--vram` to load the entire dataset to VRAM once, eliminating CPU-GPU transfer overhead:
+
+```bash
+python RCnet/main.py \
+    --train_flag \
+    --vram \
+    --data_dir /path/to/training_directory \
+    --model_save_path models/rcnet_model.pth \
+    --epochs 50 \
+    --learning_rate 1e-3 \
+    --batch_size 256
+```
+
+**Note:** Requires ~0.6 MB VRAM per image (10k images ≈ 6 GB). Use standard mode for larger datasets.
+
 ### Training with Non-Salient Data
 
 To improve model robustness, you can include non-salient (background) images:
@@ -110,12 +127,15 @@ python RCnet/main.py \
 | Argument | Description | Default |
 |----------|-------------|---------|
 | `--train_flag` | Enable training mode | (flag) |
+| `--vram` | Load entire dataset to VRAM for maximum speed | (flag) |
 | `--data_dir` | Path to training directory (required) | - |
 | `--non_salient_data_dir` | Path to non-salient images (optional) | None |
 | `--model_save_path` | Path to save trained model | `model.pth` |
 | `--model_load_path` | Path to load pre-trained model | `model.pth` |
 | `--epochs` | Number of training epochs | 10 |
-| `--learning_rate` | Learning rate for optimizer | 1e-3 |
+| `--learning_rate` | Learning rate for optimizer | 1e-4 |
+| `--batch_size` | Batch size for training | 128 |
+| `--num_workers` | Number of data loading workers | 0 |
 | `--save_plot_flag` | Save training loss plots | (flag) |
 | `--save_plot_path` | Path to save training plot | `plot.png` |
 
