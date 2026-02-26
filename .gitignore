@@ -161,3 +161,6 @@ cython_debug/
 *.bak
 *.log
 
+vram_cache/vram_cache_train_5250imgs_100pct_ddb855f4.pt
+.gitignore
+vram_cache/vram_cache_val_1125imgs_100pct_7de6960e.pt

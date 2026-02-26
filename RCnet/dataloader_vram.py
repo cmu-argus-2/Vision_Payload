@@ -15,10 +15,12 @@ Classes:
     VRAMBatchSampler: Custom sampler for efficient VRAM batch sampling
 """
 
+import gc
 import json
 import os
 import random
 import warnings
+import hashlib
 from typing import List, Optional, Tuple
 
 import numpy as np
@@ -59,6 +61,7 @@ class MGRSImageDatasetVRAM(Dataset):
         preload_to_vram: bool = True,
         data_subset_percent: float = 1.0,
         num_workers: int = 0,
+        vram_cache_path: Optional[str] = None,
     ) -> None:
         """
         Args:
@@ -75,13 +78,20 @@ class MGRSImageDatasetVRAM(Dataset):
             preload_to_vram (bool): Whether to pre-load all data to VRAM (default: True).
             data_subset_percent (float): Percentage of data to use (0.0-1.0, default: 1.0 for all data).
             num_workers (int): Number of workers for parallel data loading during initialization (default: 0).
+            vram_cache_path (Optional[str]): Path to directory for caching VRAM tensors (default: None, uses ./vram_cache).
         """
         self.root_dir = root_dir
         self.transform = transform
+        self.vram_cache_path = vram_cache_path or "./vram_cache"
+        self.split = split
         self.salient_regions = sorted(salient_regions or [])
         self.device = device if device is not None else torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.preload_to_vram = preload_to_vram and torch.cuda.is_available()
         self.num_workers = num_workers
+        self.seed = seed
+        self.train_ratio = train_ratio
+        self.val_ratio = val_ratio
+        self.data_subset_percent = data_subset_percent
 
         # Create mapping from region to index
         self.salient_region_indices = {region: i for i, region in enumerate(self.salient_regions)}
@@ -144,9 +154,12 @@ class MGRSImageDatasetVRAM(Dataset):
 
         Logger.log("INFO", f"[VRAM-Resident] Total {split} images: {len(self.files)}")
 
-        # VRAM Pre-loading: Load all data into GPU memory
+        # VRAM Pre-loading: Load all data into GPU memory (or from cache)
         if self.preload_to_vram:
-            self._preload_all_to_vram()
+            # Try to load from cache first, fallback to loading from disk
+            if not self._load_vram_cache():
+                self._preload_all_to_vram()
+                self._save_vram_cache()
         else:
             Logger.log("WARNING", "[VRAM-Resident] VRAM pre-loading disabled, will load on-demand")
             self.vram_images = None
@@ -234,12 +247,21 @@ class MGRSImageDatasetVRAM(Dataset):
                 # Copy label to GPU
                 self.vram_labels[idx].copy_(label_vector, non_blocking=False)
                 
+                # Periodically trigger garbage collection to free CPU memory
+                if idx % 500 == 0 and idx > 0:
+                    gc.collect()
+                
             except Exception as e:
                 Logger.log("ERROR", f"[VRAM-Resident] Failed to load {img_path}: {e}")
                 failed_count += 1
                 # Fill with zeros for failed images
                 self.vram_images[idx].zero_()
                 self.vram_labels[idx].zero_()
+        
+        # Final cleanup after loading all images
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         
         if failed_count > 0:
             Logger.log("WARNING", f"[VRAM-Resident] Failed to load {failed_count}/{num_images} images")
@@ -251,6 +273,127 @@ class MGRSImageDatasetVRAM(Dataset):
             Logger.log("INFO", f"[VRAM-Resident] GPU memory after loading: allocated={allocated_vram:.1f} MB, reserved={reserved_vram:.1f} MB")
         
         Logger.log("INFO", f"[VRAM-Resident] Successfully pre-loaded {len(self.files) - failed_count}/{len(self.files)} images to VRAM")
+
+    def _get_cache_filename(self) -> str:
+        """
+        Generate a unique cache filename based on dataset configuration.
+        Uses a hash of configuration parameters to detect changes.
+        """
+        # Create a configuration string to hash
+        config_str = f"{self.split}_{len(self.files)}_{self.data_subset_percent}_{self.seed}_"
+        config_str += f"{self.train_ratio}_{self.val_ratio}_{len(self.salient_regions)}"
+        config_str += f"_{','.join(sorted(self.salient_regions))}"
+        
+        # Generate hash
+        config_hash = hashlib.md5(config_str.encode()).hexdigest()[:8]
+        
+        # Create filename
+        filename = f"vram_cache_{self.split}_{len(self.files)}imgs_{int(self.data_subset_percent*100)}pct_{config_hash}.pt"
+        return os.path.join(self.vram_cache_path, filename)
+    
+    def _save_vram_cache(self) -> None:
+        """
+        Save pre-loaded VRAM tensors to a single .pt file on disk.
+        This allows for fast loading on subsequent runs.
+        """
+        if self.vram_images is None or self.vram_labels is None:
+            Logger.log("WARNING", "[VRAM-Cache] No VRAM data to save")
+            return
+        
+        cache_file = self._get_cache_filename()
+        os.makedirs(os.path.dirname(cache_file), exist_ok=True)
+        
+        Logger.log("INFO", f"[VRAM-Cache] Saving VRAM tensors to {cache_file}...")
+        
+        try:
+            # Prepare cache data
+            cache_data = {
+                'vram_images': self.vram_images.cpu(),  # Move to CPU for saving
+                'vram_labels': self.vram_labels.cpu(),
+                'metadata': {
+                    'split': self.split,
+                    'num_files': len(self.files),
+                    'num_regions': len(self.salient_regions),
+                    'salient_regions': self.salient_regions,
+                    'data_subset_percent': self.data_subset_percent,
+                    'seed': self.seed,
+                    'train_ratio': self.train_ratio,
+                    'val_ratio': self.val_ratio,
+                    'image_shape': list(self.vram_images.shape),
+                    'label_shape': list(self.vram_labels.shape),
+                }
+            }
+            
+            # Save to disk
+            torch.save(cache_data, cache_file)
+            
+            # Calculate file size
+            file_size_mb = os.path.getsize(cache_file) / (1024**2)
+            Logger.log("INFO", f"[VRAM-Cache] Successfully saved cache ({file_size_mb:.1f} MB): {cache_file}")
+            
+            # Free CPU copies after saving
+            del cache_data
+            gc.collect()
+            
+        except Exception as e:
+            Logger.log("ERROR", f"[VRAM-Cache] Failed to save cache: {e}")
+    
+    def _load_vram_cache(self) -> bool:
+        """
+        Load pre-saved VRAM tensors from cache file.
+        
+        Returns:
+            bool: True if cache was loaded successfully, False otherwise
+        """
+        cache_file = self._get_cache_filename()
+        
+        if not os.path.exists(cache_file):
+            Logger.log("INFO", f"[VRAM-Cache] No cache file found at {cache_file}")
+            return False
+        
+        Logger.log("INFO", f"[VRAM-Cache] Loading VRAM tensors from cache: {cache_file}...")
+        
+        try:
+            # Load cache data
+            cache_data = torch.load(cache_file, weights_only=False)
+            
+            # Validate metadata
+            metadata = cache_data.get('metadata', {})
+            if metadata.get('split') != self.split:
+                Logger.log("WARNING", f"[VRAM-Cache] Split mismatch, ignoring cache")
+                return False
+            
+            if metadata.get('num_files') != len(self.files):
+                Logger.log("WARNING", f"[VRAM-Cache] File count mismatch, ignoring cache")
+                return False
+            
+            if metadata.get('salient_regions') != self.salient_regions:
+                Logger.log("WARNING", f"[VRAM-Cache] Region mismatch, ignoring cache")
+                return False
+            
+            # Load tensors to VRAM
+            self.vram_images = cache_data['vram_images'].to(self.device, non_blocking=False)
+            self.vram_labels = cache_data['vram_labels'].to(self.device, non_blocking=False)
+            
+            # Free CPU cache data immediately after loading to GPU
+            del cache_data
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
+            # Log memory usage
+            if torch.cuda.is_available():
+                allocated_vram = torch.cuda.memory_allocated(self.device) / (1024**2)
+                reserved_vram = torch.cuda.memory_reserved(self.device) / (1024**2)
+                Logger.log("INFO", f"[VRAM-Cache] GPU memory after cache load: allocated={allocated_vram:.1f} MB, reserved={reserved_vram:.1f} MB")
+            
+            file_size_mb = os.path.getsize(cache_file) / (1024**2)
+            Logger.log("INFO", f"[VRAM-Cache] Successfully loaded cache ({file_size_mb:.1f} MB) with {len(self.files)} images")
+            return True
+            
+        except Exception as e:
+            Logger.log("ERROR", f"[VRAM-Cache] Failed to load cache: {e}")
+            return False
 
     def __len__(self) -> int:
         return len(self.files)

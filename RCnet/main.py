@@ -51,6 +51,9 @@ def parse_args():
     parser.add_argument(
         "--data_dir", type=str, required=True, help="Path to the dataset directory."
     )
+    parser.add_argument(
+        "--vram_cache_path", type=str, default=None, help="Path to directory for caching VRAM tensors (e.g., on NVMe drive)."
+    )
     
     parser.add_argument(
         "--broken_files_path", type=str, default=None, help="Path to the broken files list.",
@@ -102,6 +105,7 @@ if __name__ == "__main__":
     if args.vram:
         classifier_kwargs["batch_size"] = args.batch_size
         classifier_kwargs["num_workers"] = args.num_workers
+        classifier_kwargs["vram_cache_path"] = args.vram_cache_path
     
     classifier = ClassifierClass(**classifier_kwargs)
 

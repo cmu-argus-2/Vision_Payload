@@ -101,10 +101,28 @@ python RCnet/main.py \
     --model_save_path models/rcnet_model.pth \
     --epochs 50 \
     --learning_rate 1e-3 \
+    --batch_size 256 \
+    --num_workers 8
+```
+
+**Key Benefits:**
+- **First run**: Loads from disk and caches to `.pt` file (~1-2 minutes)
+- **Subsequent runs**: Loads from cache in ~5-10 seconds
+- **Training**: Zero CPU-GPU transfer overhead during training
+
+**Optional - Custom Cache Location:**
+```bash
+python RCnet/main.py \
+    --train_flag \
+    --vram \
+    --data_dir /path/to/training_directory \
+    --vram_cache_path /path/to/nvme/cache \
+    --epochs 50 \
+    --learning_rate 1e-3 \
     --batch_size 256
 ```
 
-**Note:** Requires ~0.6 MB VRAM per image (10k images ≈ 6 GB). Use standard mode for larger datasets.
+**Note:** Requires ~0.6 MB VRAM per image (10k images ≈ 6 GB). Cache files are automatically invalidated when dataset changes. Use standard mode for larger datasets.
 
 ### Training with Non-Salient Data
 
@@ -129,6 +147,7 @@ python RCnet/main.py \
 | `--train_flag` | Enable training mode | (flag) |
 | `--vram` | Load entire dataset to VRAM for maximum speed | (flag) |
 | `--data_dir` | Path to training directory (required) | - |
+| `--vram_cache_path` | Directory for caching VRAM tensors (e.g., NVMe) | `./vram_cache` |
 | `--non_salient_data_dir` | Path to non-salient images (optional) | None |
 | `--model_save_path` | Path to save trained model | `model.pth` |
 | `--model_load_path` | Path to load pre-trained model | `model.pth` |
@@ -174,7 +193,8 @@ python RCnet/count_mgrs_regions.py --use_gpu
 **Error:** `RuntimeError: CUDA out of memory`
 
 **Solutions:**
-- Reduce batch size in [train_region_classifier.py](train_region_classifier.py#L175) (default: 128)
+- Reduce batch size: `--batch_size 64` (default: 128)
+- Use standard mode (remove `--vram` flag) for datasets that don't fit in GPU memory
 - Clear CUDA cache before training (already implemented in main.py)
 - Use a GPU with more memory
 

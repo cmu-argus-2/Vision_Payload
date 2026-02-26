@@ -9,6 +9,6 @@ blue_marble_directory: /mnt/nvme1n1p3/blue_marble
 training_directory: /mnt/sda2/training/
 # The directory where the trained models will be loaded from
 # If you train your own models, the models_directory can be the same as the training_directory
-models_directory: /home/argus/sunac/Vision_Payload/training_directory
+models_directory: /home/pvijayba/output/models/
 # The directory where the output files from the result of running the files in the scripts directory will be saved
 output_directory: /home/argus/sunac/Vision_Payload

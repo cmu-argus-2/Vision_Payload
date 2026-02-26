@@ -15,6 +15,7 @@ Key Differences from Regular VRAM Mode:
 - Full VRAM: Loads everything once, zero transfer overhead during training
 """
 
+import gc
 import os
 import time
 from typing import List, Optional
@@ -81,6 +82,7 @@ class TrainRegionClassifierFullVRAM(BaseRegionClassifier):
         batch_size: int = 128,
         data_subset_percent: float = 1.0,
         num_workers: int = 0,
+        vram_cache_path: Optional[str] = None,
     ) -> None:
         """
         Initializes the TrainRegionClassifierFullVRAM and pre-loads all data to VRAM.
@@ -95,6 +97,7 @@ class TrainRegionClassifierFullVRAM(BaseRegionClassifier):
             batch_size (int): Batch size for training (default: 128).
             data_subset_percent (float): Percentage of data to use (default: 1.0 for 100%).
             num_workers (int): Number of workers for parallel data loading (default: 0).
+            vram_cache_path (Optional[str]): Path to directory for caching VRAM tensors (default: None, uses ./vram_cache).
         """
         # Initializing Full-VRAM trainer
         
@@ -102,10 +105,11 @@ class TrainRegionClassifierFullVRAM(BaseRegionClassifier):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.data_subset_percent = data_subset_percent
         self.num_workers = num_workers
+        self.vram_cache_path = vram_cache_path or "./vram_cache"
         
         # Prepare data and PRE-LOAD TO VRAM
         self._prepare_full_vram_data(
-            data_path, broken_files_path, non_salient_data_path, selected_classes, batch_size
+            data_path, broken_files_path, non_salient_data_path, selected_classes, batch_size, self.vram_cache_path
         )
 
         # Now initialize the parent class with our number of classes and skip weight loading
@@ -125,12 +129,13 @@ class TrainRegionClassifierFullVRAM(BaseRegionClassifier):
         non_salient_data_path: Optional[str],
         selected_classes: Optional[List[str]],
         batch_size: int,
+        vram_cache_path: Optional[str] = None,
     ) -> None:
         """
         Prepares datasets by LOADING ALL DATA INTO VRAM upfront.
         
         This method:
-        1. Loads all images from disk
+        1. Loads all images from disk (or from cache)
         2. Applies transformations
         3. Stores everything in VRAM
         4. Creates samplers for efficient batch access
@@ -141,6 +146,7 @@ class TrainRegionClassifierFullVRAM(BaseRegionClassifier):
             non_salient_data_path (str) (Optional): Path to non-salient data.
             selected_classes (list) (Optional): List of salient regions for classification.
             batch_size (int): Batch size for data loaders.
+            vram_cache_path (Optional[str]): Path to directory for caching VRAM tensors.
         """
         if selected_classes is None:
             try:
@@ -187,7 +193,7 @@ class TrainRegionClassifierFullVRAM(BaseRegionClassifier):
             ]
         )
 
-        # Create VRAM-resident datasets (this loads all data to GPU)
+        # Create VRAM-resident datasets (this loads all data to GPU or from cache)
         self.train_dataset_vram = MGRSImageDatasetVRAM(
             data_path,
             broken_files,
@@ -199,6 +205,7 @@ class TrainRegionClassifierFullVRAM(BaseRegionClassifier):
             preload_to_vram=True,  # KEY: Pre-load everything to VRAM
             data_subset_percent=self.data_subset_percent,
             num_workers=self.num_workers,
+            vram_cache_path=vram_cache_path,
         )
         
         self.val_dataset_vram = MGRSImageDatasetVRAM(
@@ -212,6 +219,7 @@ class TrainRegionClassifierFullVRAM(BaseRegionClassifier):
             preload_to_vram=True,  # KEY: Pre-load everything to VRAM
             data_subset_percent=self.data_subset_percent,
             num_workers=self.num_workers,
+            vram_cache_path=vram_cache_path,
         )
         
         self.test_dataset_vram = MGRSImageDatasetVRAM(
@@ -225,6 +233,7 @@ class TrainRegionClassifierFullVRAM(BaseRegionClassifier):
             preload_to_vram=True,  # KEY: Pre-load everything to VRAM
             data_subset_percent=self.data_subset_percent,
             num_workers=self.num_workers,
+            vram_cache_path=vram_cache_path,
         )
 
         # Create custom batch samplers
@@ -238,7 +247,11 @@ class TrainRegionClassifierFullVRAM(BaseRegionClassifier):
             len(self.test_dataset_vram), batch_size, shuffle=False
         )
 
-        # Datasets loaded to VRAM
+        # Datasets loaded to VRAM - now clean up any remaining CPU memory
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        Logger.log("INFO", "[Full-VRAM] Garbage collection completed after dataset loading")
 
     def _get_vram_batch(self, dataset, indices):
         """
@@ -352,6 +365,11 @@ class TrainRegionClassifierFullVRAM(BaseRegionClassifier):
             epoch_loss /= total_images
             mem_end_epoch = proc.memory_info().rss / 1024**2
             
+            # Clean up memory after epoch
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
             wandb.log({
                 "epoch": epoch+1,
                 "epoch_loss": epoch_loss,
@@ -363,6 +381,11 @@ class TrainRegionClassifierFullVRAM(BaseRegionClassifier):
             # Save checkpoint
             self.save_model(path=f"RCnet/chkpts/model_fullvram_{epoch + 1}.pth")
             self.validate()
+            
+            # Clean up after validation
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
             
             if epoch == epochs - 1:
                 test_accuracy = self.evaluate()
@@ -418,6 +441,11 @@ class TrainRegionClassifierFullVRAM(BaseRegionClassifier):
                 "validation_recall": recall * 100,
             }
         )
+        
+        # Clean up after validation
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         return f1_score * 100
 
@@ -459,7 +487,6 @@ class TrainRegionClassifierFullVRAM(BaseRegionClassifier):
                 start_time = time.time()
                 outputs = self.model(images)
                 end_time = time.time()
-                print(outputs)
                 predicted = outputs > 0.5
                 tot_time += end_time - start_time
 
@@ -529,13 +556,18 @@ class TrainRegionClassifierFullVRAM(BaseRegionClassifier):
             **{f"{k}_accuracy": v for k, v in class_accuracies.items()},
         })
 
-        # Evaluation complete
+        # Evaluation complete - clean up memory
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         
         return f1_score * 100
 
     def save_model(self, path: str = "model.pth") -> None:
         """Saves the trained model."""
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        dir_path = os.path.dirname(path)
+        if dir_path:  # Only create directory if path contains one
+            os.makedirs(dir_path, exist_ok=True)
         torch.save(self.model.state_dict(), path)
 
     def load_model(self, path: str = "model.pth") -> None:

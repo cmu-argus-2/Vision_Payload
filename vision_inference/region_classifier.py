@@ -35,7 +35,7 @@ class RegionClassifier:
     """
     
     NUM_CLASSES = 15
-    CONFIDENCE_THRESHOLD = 0.55
+    CONFIDENCE_THRESHOLD = 0.5
     DOWNSAMPLED_SIZE = (224, 224)
     IMAGE_NET_MEAN = [0.485, 0.456, 0.406]
     IMAGE_NET_STD = [0.229, 0.224, 0.225]
@@ -268,11 +268,15 @@ class ClassifierEfficient(nn.Module):
         weights = EfficientNet_B0_Weights.DEFAULT
         self.efficientnet = efficientnet_b0(weights=weights)
         for param in self.efficientnet.features[:3].parameters():
-            param.requires_grad = False
-        num_features = self.efficientnet.classifier[1].in_features
+            param.requires_grad = True
+        # num_features = self.efficientnet.classifier[1].in_features
         # num_classes = len(RegionClassifier.load_region_ids())
-        self.efficientnet.classifier[1] = nn.Linear(num_features, RegionClassifier.NUM_CLASSES) # TODO Remove after debug
+        # self.efficientnet.classifier[1] = nn.Linear(num_features, RegionClassifier.NUM_CLASSES) # TODO Remove after debug
         # self.efficientnet.classifier[1] = nn.Linear(num_features, num_classes)
+        num_features = self.efficientnet.classifier[1].in_features
+        self.efficientnet.classifier = nn.Sequential(
+                nn.Dropout(p=0.3), # Helps prevent overfitting
+                nn.Linear(num_features, RegionClassifier.NUM_CLASSES))
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
