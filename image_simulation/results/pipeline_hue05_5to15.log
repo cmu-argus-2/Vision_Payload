@@ -1,0 +1,44 @@
+[Pipeline] loading RC model /home/sunac/Vision_Payload/RCnet/output/model_a090_hue05_best.pth
+[Pipeline] processing 300 simulated images
+  [10/300] RC recall so far: 10/10 = 100.0%
+  [20/300] RC recall so far: 19/20 = 95.0%
+  [30/300] RC recall so far: 29/30 = 96.7%
+  [40/300] RC recall so far: 37/40 = 92.5%
+  [50/300] RC recall so far: 47/50 = 94.0%
+  [60/300] RC recall so far: 57/60 = 95.0%
+  [70/300] RC recall so far: 67/70 = 95.7%
+  [80/300] RC recall so far: 76/80 = 95.0%
+  [90/300] RC recall so far: 86/90 = 95.6%
+  [100/300] RC recall so far: 94/100 = 94.0%
+  [110/300] RC recall so far: 103/110 = 93.6%
+  [120/300] RC recall so far: 110/120 = 91.7%
+  [130/300] RC recall so far: 120/130 = 92.3%
+  [140/300] RC recall so far: 127/140 = 90.7%
+  [150/300] RC recall so far: 134/150 = 89.3%
+  [160/300] RC recall so far: 141/160 = 88.1%
+[Pipeline] no LD model for 33S at /mnt/sda2/training/33S/yolo_model_weights.pt, skipping.
+  [170/300] RC recall so far: 151/170 = 88.8%
+  [180/300] RC recall so far: 161/180 = 89.4%
+  [190/300] RC recall so far: 169/190 = 88.9%
+  [200/300] RC recall so far: 178/200 = 89.0%
+  [210/300] RC recall so far: 188/210 = 89.5%
+  [220/300] RC recall so far: 195/220 = 88.6%
+  [230/300] RC recall so far: 203/230 = 88.3%
+  [240/300] RC recall so far: 211/240 = 87.9%
+  [250/300] RC recall so far: 218/250 = 87.2%
+  [260/300] RC recall so far: 225/260 = 86.5%
+  [270/300] RC recall so far: 235/270 = 87.0%
+  [280/300] RC recall so far: 244/280 = 87.1%
+  [290/300] RC recall so far: 252/290 = 86.9%
+  [300/300] RC recall so far: 261/300 = 87.0%
+[Pipeline] wrote /home/sunac/Vision_Payload/image_simulation/pipeline_hue05_5to15.json
+[Pipeline] RC recall: 87.0%
+[Pipeline] LD total detections: 6859 across 15 regions
+[Pipeline] By TINT (vs baseline / vs GT):
+  none: n=91  base_recall=55.8%  gt_recall=20.3%  gt_prec=95.4%  (baseline_gt_recall=38.6%)
+  orange: n=68  base_recall=46.9%  gt_recall=15.1%  gt_prec=96.1%  (baseline_gt_recall=39.9%)
+  purple: n=78  base_recall=26.5%  gt_recall=6.9%  gt_prec=100.0%  (baseline_gt_recall=34.1%)
+[Pipeline] By ANGLE bucket (vs baseline / vs GT):
+  ~5°: n=58  base_recall=49.8%  gt_recall=15.8%  gt_prec=94.2%
+  ~10°: n=129  base_recall=45.6%  gt_recall=18.6%  gt_prec=98.3%
+  ~15°: n=50  base_recall=31.5%  gt_recall=2.3%  gt_prec=100.0%

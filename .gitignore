@@ -164,3 +164,10 @@ cython_debug/
 vram_cache/vram_cache_train_5250imgs_100pct_ddb855f4.pt
 .gitignore
 vram_cache/vram_cache_val_1125imgs_100pct_7de6960e.pt
+
+# image_simulation generated artifacts
+image_simulation/sim_val100/
+image_simulation/sim_val100_5to15/
+image_simulation/sample_outputs/
+image_simulation/sample_outputs_extreme/
+image_simulation/sample_outputs_random/
