@@ -211,12 +211,22 @@ class MGRSImageDatasetVRAM(Dataset):
                 Logger.log("WARNING", f"[VRAM-Resident] Estimated memory usage ({estimated_total_mb:.1f} MB) "
                           f"may exceed available VRAM ({available_vram:.1f} MB). Consider reducing dataset size.")
         
+        # Derive image shape from transform by probing one sample
+        probe_img = Image.open(self.files[0][0]).convert("RGB")
+        if self.transform:
+            probe_tensor = self.transform(probe_img)
+        else:
+            from torchvision import transforms
+            probe_tensor = transforms.ToTensor()(probe_img)
+        _, img_h, img_w = probe_tensor.shape
+        Logger.log("INFO", f"[VRAM-Resident] Detected image shape from transform: 3x{img_h}x{img_w}")
+
         # Pre-allocate tensors on GPU
-        self.vram_images = torch.empty((num_images, 3, 224, 224), dtype=torch.float32, device=self.device)
+        self.vram_images = torch.empty((num_images, 3, img_h, img_w), dtype=torch.float32, device=self.device)
         self.vram_labels = torch.empty((num_images, num_labels), dtype=torch.float32, device=self.device)
-        
+
         Logger.log("INFO", f"[VRAM-Resident] Allocated VRAM tensors: images={self.vram_images.shape}, labels={self.vram_labels.shape}")
-        
+
         # Load all images and labels
         failed_count = 0
         for idx, (img_path, json_path) in enumerate(tqdm(self.files, desc="Loading to VRAM", unit="img")):
@@ -228,10 +238,10 @@ class MGRSImageDatasetVRAM(Dataset):
                 else:
                     from torchvision import transforms
                     image_tensor = transforms.ToTensor()(image)
-                
+
                 # Copy to pre-allocated GPU memory
                 self.vram_images[idx].copy_(image_tensor, non_blocking=False)
-                
+
                 # Prepare label
                 label_vector = torch.zeros(len(self.salient_regions), dtype=torch.float32)
                 if json_path:
@@ -243,14 +253,14 @@ class MGRSImageDatasetVRAM(Dataset):
                             i = self.salient_region_indices[mgrs_zone]
                             raw_value = count / total_count if total_count > 0 else 0
                             label_vector[i] = self._custom_sigmoid(raw_value)
-                
+
                 # Copy label to GPU
                 self.vram_labels[idx].copy_(label_vector, non_blocking=False)
-                
+
                 # Periodically trigger garbage collection to free CPU memory
                 if idx % 500 == 0 and idx > 0:
                     gc.collect()
-                
+
             except Exception as e:
                 Logger.log("ERROR", f"[VRAM-Resident] Failed to load {img_path}: {e}")
                 failed_count += 1
@@ -283,6 +293,10 @@ class MGRSImageDatasetVRAM(Dataset):
         config_str = f"{self.split}_{len(self.files)}_{self.data_subset_percent}_{self.seed}_"
         config_str += f"{self.train_ratio}_{self.val_ratio}_{len(self.salient_regions)}"
         config_str += f"_{','.join(sorted(self.salient_regions))}"
+        # Include image shape in hash so caches with different transforms (e.g. square vs rectangular) don't collide
+        if hasattr(self, 'vram_images'):
+            _, _, h, w = self.vram_images.shape
+            config_str += f"_{h}x{w}"
         
         # Generate hash
         config_hash = hashlib.md5(config_str.encode()).hexdigest()[:8]

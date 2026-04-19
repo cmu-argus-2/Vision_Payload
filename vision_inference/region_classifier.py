@@ -34,7 +34,7 @@ class RegionClassifier:
     A class to classify MGRS regions in images using a pretrained EfficientNet model.
     """
     
-    NUM_CLASSES = 15
+    NUM_CLASSES = 16
     CONFIDENCE_THRESHOLD = 0.5
     DOWNSAMPLED_SIZE = (224, 224)
     IMAGE_NET_MEAN = [0.485, 0.456, 0.406]

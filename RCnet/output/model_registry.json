@@ -1,0 +1,81 @@
+{
+  "description": "Registry of trained RCnet models with hyperparameters and validation metrics.",
+  "notes": {
+    "alpha": "FocalLoss positive-class weight (boosts positives). See FocalLoss in train_region_classifier_fullvram.py",
+    "gamma": "FocalLoss focusing parameter (down-weights easy examples).",
+    "strict_threshold": "Target label threshold for binarizing ground truth during validation. label > threshold = positive. Corresponds to sigmoid(coverage) where 0.5 -> ~25% coverage, 0.25 -> ~18% coverage.",
+    "prediction_threshold": "Model output threshold for binarizing predictions. outputs > threshold = predicted positive.",
+    "best_epoch": "Epoch at which the reported validation metrics were achieved (used for best-model saving).",
+    "f1_soft": "F1 under SOFT convention (any coverage > 0 counts as ground-truth positive)."
+  },
+  "models": [
+    {
+      "name": "alpha=0.85, strict=0.5",
+      "path": "/home/sunac/Vision_Payload/RCnet/output/model_a085_strict_best.pth",
+      "alpha": 0.85,
+      "gamma": 3,
+      "strict_threshold": 0.5,
+      "prediction_threshold": 0.5,
+      "best_epoch": 24,
+      "validation": {
+        "f1": 96.13,
+        "precision": 94.78,
+        "recall": 97.51,
+        "f1_soft": 82.50,
+        "precision_soft": 99.81,
+        "recall_soft": 70.31
+      }
+    },
+    {
+      "name": "alpha=0.90, strict=0.5",
+      "path": "/home/sunac/Vision_Payload/RCnet/output/model_a090_strict_best.pth",
+      "alpha": 0.90,
+      "gamma": 3,
+      "strict_threshold": 0.5,
+      "prediction_threshold": 0.5,
+      "best_epoch": 24,
+      "validation": {
+        "f1": 96.12,
+        "precision": 94.21,
+        "recall": 98.10,
+        "f1_soft": 83.04,
+        "precision_soft": 99.75,
+        "recall_soft": 71.12
+      }
+    },
+    {
+      "name": "alpha=0.85, strict=0.25",
+      "path": "/home/sunac/Vision_Payload/RCnet/output/model_a085_s25_best.pth",
+      "alpha": 0.85,
+      "gamma": 3,
+      "strict_threshold": 0.25,
+      "prediction_threshold": 0.5,
+      "best_epoch": 17,
+      "validation": {
+        "f1": 95.88,
+        "precision": 95.09,
+        "recall": 96.68,
+        "f1_soft": 82.98,
+        "precision_soft": 99.69,
+        "recall_soft": 71.08
+      }
+    },
+    {
+      "name": "alpha=0.90, strict=0.25",
+      "path": "/home/sunac/Vision_Payload/RCnet/output/model_a090_s25_best.pth",
+      "alpha": 0.90,
+      "gamma": 3,
+      "strict_threshold": 0.25,
+      "prediction_threshold": 0.5,
+      "best_epoch": 30,
+      "validation": {
+        "f1": 96.34,
+        "precision": 95.83,
+        "recall": 96.87,
+        "f1_soft": 82.87,
+        "precision_soft": 99.87,
+        "recall_soft": 70.81
+      }
+    }
+  ]
+}

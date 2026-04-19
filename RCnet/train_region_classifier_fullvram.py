@@ -46,7 +46,8 @@ class FocalLoss(nn.Module):
     def forward(self, inputs, targets):
         bce_loss = nn.functional.binary_cross_entropy(inputs, targets, reduction='none')
         pt = torch.exp(-bce_loss)
-        focal_loss = self.alpha * (1-pt)**self.gamma * bce_loss
+        alpha_t = self.alpha * targets + (1 - self.alpha) * (1 - targets)
+        focal_loss = alpha_t * (1-pt)**self.gamma * bce_loss
         return focal_loss.mean()
 
 
@@ -106,7 +107,7 @@ class TrainRegionClassifierFullVRAM(BaseRegionClassifier):
         self.data_subset_percent = data_subset_percent
         self.num_workers = num_workers
         self.vram_cache_path = vram_cache_path or "./vram_cache"
-        
+
         # Prepare data and PRE-LOAD TO VRAM
         self._prepare_full_vram_data(
             data_path, broken_files_path, non_salient_data_path, selected_classes, batch_size, self.vram_cache_path
@@ -304,10 +305,15 @@ class TrainRegionClassifierFullVRAM(BaseRegionClassifier):
         )
         wandb.watch(self.model, log="all", log_freq=100)
         #criterion = nn.BCEWithLogitsLoss()
-        criterion = FocalLoss(alpha=0.25, gamma=2)
+        criterion = FocalLoss(alpha=float(os.environ.get('RC_ALPHA', '0.90')), gamma=int(os.environ.get('RC_GAMMA', '3')))
         optimizer = optim.AdamW(self.model.parameters(), lr=learning_rate)
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='max', factor=0.5, patience=3, min_lr=1e-6
+        )
 
         proc = psutil.Process(os.getpid())
+        best_val_f1 = -1.0
+        self.best_model_path = getattr(self, 'best_model_path', 'RCnet/output/model_best.pth')
 
         for epoch in range(epochs):
             # Update sampler epoch for shuffling
@@ -380,8 +386,16 @@ class TrainRegionClassifierFullVRAM(BaseRegionClassifier):
 
             # Save checkpoint
             self.save_model(path=f"RCnet/chkpts/model_fullvram_{epoch + 1}.pth")
-            self.validate()
-            
+            val_f1 = self.validate()
+            scheduler.step(val_f1)
+            current_lr = optimizer.param_groups[0]['lr']
+            wandb.log({"learning_rate": current_lr})
+
+            if val_f1 > best_val_f1:
+                best_val_f1 = val_f1
+                self.save_model(path=self.best_model_path)
+                print(f"[BEST] Epoch {epoch+1}: F1={val_f1:.2f} saved to {self.best_model_path}")
+
             # Clean up after validation
             gc.collect()
             if torch.cuda.is_available():
@@ -404,43 +418,42 @@ class TrainRegionClassifierFullVRAM(BaseRegionClassifier):
         """
         self.model.eval()
 
-        true_positives = 0
-        false_positives = 0
-        false_negatives = 0
+        # Track TP/FP/FN under both label conventions:
+        #   STRICT = labels > 0.25 (only dominant regions count as ground-truth positive)
+        #   SOFT   = labels != 0   (any coverage counts as ground-truth positive)
+        counts = {'strict': [0, 0, 0], 'soft': [0, 0, 0]}  # tp, fp, fn
 
         with torch.no_grad():
             progress_bar = tqdm(self.val_sampler, desc="[Full-VRAM] Validating", leave=True, unit="batch")
             for indices in progress_bar:
-                # Get batch directly from VRAM
                 images, labels = self._get_vram_batch(self.val_dataset_vram, indices)
-                
                 outputs = self.model(images)
-                predictions = outputs > 0.5  # Lower threshold for better recall
+                predictions = outputs > 0.5
 
-                # Calculate metrics
-                true_positives += (predictions & labels.bool()).sum().item()
-                false_positives += (predictions & ~labels.bool()).sum().item()
-                false_negatives += (~predictions & labels.bool()).sum().item()
+                for name, label_bin in [('strict', labels > 0.25), ('soft', labels.bool())]:
+                    counts[name][0] += (predictions & label_bin).sum().item()
+                    counts[name][1] += (predictions & ~label_bin).sum().item()
+                    counts[name][2] += (~predictions & label_bin).sum().item()
 
-        precision = (
-            true_positives / (true_positives + false_positives)
-            if (true_positives + false_positives) > 0
-            else 0
-        )
-        recall = (
-            true_positives / (true_positives + false_negatives)
-            if (true_positives + false_negatives) > 0
-            else 0
-        )
-        f1_score = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+        metrics = {}
+        for name in ('strict', 'soft'):
+            tp, fp, fn = counts[name]
+            p = tp / (tp + fp) if (tp + fp) > 0 else 0
+            r = tp / (tp + fn) if (tp + fn) > 0 else 0
+            f1 = 2 * p * r / (p + r) if (p + r) > 0 else 0
+            metrics[f'validation_f1_{name}'] = f1 * 100
+            metrics[f'validation_precision_{name}'] = p * 100
+            metrics[f'validation_recall_{name}'] = r * 100
 
-        wandb.log(
-            {
-                "validation_f1_score": f1_score * 100,
-                "validation_precision": precision * 100,
-                "validation_recall": recall * 100,
-            }
-        )
+        # Also keep original keys (= STRICT) for plotter / best-model selection
+        metrics['validation_f1_score'] = metrics['validation_f1_strict']
+        metrics['validation_precision'] = metrics['validation_precision_strict']
+        metrics['validation_recall'] = metrics['validation_recall_strict']
+        wandb.log(metrics)
+
+        precision = metrics['validation_precision_strict'] / 100
+        recall = metrics['validation_recall_strict'] / 100
+        f1_score = metrics['validation_f1_strict'] / 100
         
         # Clean up after validation
         gc.collect()
@@ -483,7 +496,7 @@ class TrainRegionClassifierFullVRAM(BaseRegionClassifier):
             for indices in tqdm(self.test_sampler, desc="[Full-VRAM] Evaluating", leave=False):
                 # Get batch directly from VRAM
                 images, labels = self._get_vram_batch(self.test_dataset_vram, indices)
-                
+
                 start_time = time.time()
                 outputs = self.model(images)
                 end_time = time.time()
@@ -501,9 +514,9 @@ class TrainRegionClassifierFullVRAM(BaseRegionClassifier):
                         if pred_class < len(class_images) and len(class_images[pred_class]) < 16:
                             class_images[pred_class].append(images[i].cpu())
 
-                # Compute per-class accuracy
+                # Compute per-class accuracy (STRICT: only regions with label > 0.5)
                 for class_idx in range(labels.size(1)):
-                    class_labels = labels[:, class_idx].bool()
+                    class_labels = labels[:, class_idx] > 0.25
                     class_preds = predicted[:, class_idx]
                     class_correct[class_idx] += (class_labels & class_preds).sum().item()
                     class_total[class_idx] += class_labels.sum().item()
@@ -512,9 +525,9 @@ class TrainRegionClassifierFullVRAM(BaseRegionClassifier):
         all_features = np.concatenate(all_features, axis=0)
         all_labels = np.concatenate(all_labels, axis=0)
 
-        # Calculate final metrics
-        predicted_all = (torch.tensor(all_features) > 0.35).bool()  # Lower threshold for better recall
-        labels_all = torch.tensor(all_labels).bool()
+        # Calculate final metrics (STRICT target definition: label > 0.5 = positive)
+        predicted_all = (torch.tensor(all_features) > 0.5).bool()
+        labels_all = torch.tensor(all_labels) > 0.25
         
         true_positives = (predicted_all & labels_all).sum().item()
         false_positives = (predicted_all & ~labels_all).sum().item()

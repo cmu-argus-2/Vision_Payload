@@ -110,8 +110,14 @@ if __name__ == "__main__":
     classifier = ClassifierClass(**classifier_kwargs)
 
     if args.train_flag:
-        # Train the model
+        # Set best model save path (best val F1 during training saved here, and loaded before final save)
+        classifier.best_model_path = args.model_save_path.replace('.pth', '_best.pth')
         classifier.train(epochs=args.epochs, learning_rate=args.learning_rate)
+        # Load the best model and save it as the primary output
+        import os
+        if os.path.exists(classifier.best_model_path):
+            classifier.load_model(path=classifier.best_model_path)
+            print(f"Loaded best model from {classifier.best_model_path}")
         classifier.save_model(path=args.model_save_path)
     else:
         # Load the model for evaluation
