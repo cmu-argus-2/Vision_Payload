@@ -138,9 +138,18 @@ def train_yolo(
     print(f"Using device={device} for training region={region}")
 
     region_dir = os.path.join(training_dir, region)
-    output_file = os.path.join(region_dir, MODEL_WEIGHTS_FILE_NAME)
 
-    # Check if output already exists
+    # Save weights with a unique, descriptive filename so we never overwrite
+    # someone else's checkpoint. Format:
+    #   yolo_model_weights_{region}_{version}_deg{degrees}_{YYYYMMDD}.pt
+    # Written to LD/output/<region>/ (under the repo) since training_dir
+    # may not be writable by the current user.
+    from datetime import datetime
+    suffix = f"{region}_{version}_{int(degrees)}rot_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    output_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "LD", "output", region)
+    os.makedirs(output_dir, exist_ok=True)
+    output_file = os.path.join(output_dir, f"yolo_model_weights_{suffix}.pt")
+
     if os.path.exists(output_file):
         if not overwrite:
             raise FileExistsError(f"Output file {output_file} already exists. Use --overwrite to replace.")
